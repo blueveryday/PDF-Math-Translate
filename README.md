@@ -75,6 +75,7 @@ We provide three methods for using this project: [Commandline](#cmd), [Portable]
 
       ```bash
       pip install pdf2zh
+	  pip install --upgrade huggingface-hub
       ```
 
   3. Execute translation, files generated in [current working directory](https://chatgpt.com/share/6745ed36-9acc-800e-8a90-59204bd13444):
@@ -96,6 +97,7 @@ Download [setup.bat](https://raw.githubusercontent.com/Byaidu/PDFMathTranslate/r
 
       ```bash
       pip install pdf2zh
+	  pip install --upgrade huggingface-hub
       ```
 
 3. Start using in browser:

@@ -75,6 +75,7 @@
 
       ```bash
       pip install pdf2zh
+	  pip install --upgrade huggingface-hub
       ```
 
   3. 执行翻译，生成文件位于 [当前工作目录](https://chatgpt.com/share/6745ed36-9acc-800e-8a90-59204bd13444)：
@@ -96,6 +97,7 @@
 
       ```bash
       pip install pdf2zh
+	  pip install --upgrade huggingface-hub
       ```
 
 3. 开始在浏览器中使用：
