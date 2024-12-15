@@ -14,13 +14,13 @@ from pdf2zh.translator import (
     OpenAITranslator,
     ZhipuTranslator,
     SiliconTranslator,
+    GeminiTranslator,
     AzureTranslator,
     TencentTranslator,
 )
 
 import gradio as gr
-import numpy as np
-import pymupdf
+from gradio_pdf import PDF
 import tqdm
 import requests
 import cgi
@@ -35,6 +35,7 @@ service_map: dict[str, BaseTranslator] = {
     "OpenAI": OpenAITranslator,
     "Zhipu": ZhipuTranslator,
     "Silicon": SiliconTranslator,
+    "Gemini": GeminiTranslator,
     "Azure": AzureTranslator,
     "Tencent": TencentTranslator,
 }
@@ -76,19 +77,6 @@ def verify_recaptcha(response):
     result = requests.post(recaptcha_url, data=data).json()
     print("reCAPTCHA", result.get("success"))
     return result.get("success")
-
-
-def pdf_preview(file):
-    doc = pymupdf.open(file)
-    page = doc[0]
-    pix = page.get_pixmap()
-    image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)
-    return image
-
-
-def upload_file(file, service, progress=gr.Progress()):
-    preview_image = pdf_preview(file)
-    return file, preview_image
 
 
 def download_with_limit(url, save_path, size_limit):
@@ -164,7 +152,7 @@ def translate_file(
         progress(t.n / t.total, desc="Translating...")
 
     param = {
-        "files": [file_raw],
+        "files": [str(file_raw)],
         "pages": selected_page,
         "lang_in": lang_from,
         "lang_out": lang_to,
@@ -180,16 +168,11 @@ def translate_file(
     if not file_mono.exists() or not file_dual.exists():
         raise gr.Error("No output")
 
-    try:
-        translated_preview = pdf_preview(str(file_mono))
-    except Exception:
-        raise gr.Error("No preview")
-
     progress(1.0, desc="Translation complete!")
 
     return (
         str(file_mono),
-        translated_preview,
+        str(file_mono),
         str(file_dual),
         gr.update(visible=True),
         gr.update(visible=True),
@@ -227,16 +210,6 @@ with gr.Blocks(
     .input-file {
         border: 1.2px dashed #165DFF !important;
         border-radius: 6px !important;
-        # background-color: #ffffff !important;
-        transition: background-color 0.4s ease-out;
-    }
-
-    .input-file:hover {
-        border: 1.2px dashed #165DFF !important;
-        border-radius: 6px !important;
-        color: #165DFF !important;
-        background-color: #E8F3FF !important;
-        transition: background-color 0.2s ease-in;
     }
 
     .progress-bar-wrap {
@@ -334,7 +307,9 @@ with gr.Blocks(
                 )
 
             output_title = gr.Markdown("## Translated", visible=False)
-            output_file = gr.File(label="Download Translation", visible=False)
+            output_file_mono = gr.File(
+                label="Download Translation (Mono)", visible=False
+            )
             output_file_dual = gr.File(
                 label="Download Translation (Dual)", visible=False
             )
@@ -380,13 +355,13 @@ with gr.Blocks(
 
         with gr.Column(scale=2):
             gr.Markdown("## Preview")
-            preview = gr.Image(label="Document Preview", visible=True)
+            preview = PDF(label="Document Preview", visible=True)
 
     # Event handlers
     file_input.upload(
-        upload_file,
-        inputs=[file_input, service],
-        outputs=[file_input, preview],
+        lambda x: x,
+        inputs=file_input,
+        outputs=preview,
         js=(
             f"""
             (a,b)=>{{
@@ -418,10 +393,10 @@ with gr.Blocks(
             *envs,
         ],
         outputs=[
-            output_file,
+            output_file_mono,
             preview,
             output_file_dual,
-            output_file,
+            output_file_mono,
             output_file_dual,
             output_title,
         ],

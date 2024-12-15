@@ -46,13 +46,6 @@ def create_parser() -> argparse.ArgumentParser:
         help="The list of page numbers to parse.",
     )
     parse_params.add_argument(
-        "--password",
-        "-P",
-        type=str,
-        default="",
-        help="The password to use for decrypting PDF file.",
-    )
-    parse_params.add_argument(
         "--vfont",
         "-f",
         type=str,
@@ -112,6 +105,16 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable Gradio Share",
     )
+    parse_params.add_argument(
+        "--flask",
+        action="store_true",
+        help="flask",
+    )
+    parse_params.add_argument(
+        "--celery",
+        action="store_true",
+        help="celery",
+    )
 
     return parser
 
@@ -144,6 +147,18 @@ def main(args: Optional[List[str]] = None) -> int:
         from pdf2zh.gui import setup_gui
 
         setup_gui(parsed_args.share)
+        return 0
+
+    if parsed_args.flask:
+        from pdf2zh.backend import flask_app
+
+        flask_app.run(port=11008)
+        return 0
+
+    if parsed_args.celery:
+        from pdf2zh.backend import celery_app
+
+        celery_app.start(argv=sys.argv[2:])
         return 0
 
     translate(**vars(parsed_args))
