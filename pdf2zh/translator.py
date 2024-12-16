@@ -15,6 +15,8 @@ from tencentcloud.tmt.v20180321.tmt_client import TmtClient
 from tencentcloud.tmt.v20180321.models import TextTranslateRequest
 from tencentcloud.tmt.v20180321.models import TextTranslateResponse
 
+import json
+
 
 def remove_control_characters(s):
     return "".join(ch for ch in s if unicodedata.category(ch)[0] != "C")
@@ -89,26 +91,27 @@ class BingTranslator(BaseTranslator):
     def __init__(self, lang_in, lang_out, model):
         super().__init__(lang_in, lang_out, model)
         self.session = requests.Session()
-        self.endpoint = "https://www.bing.com/ttranslatev3"
+        self.endpoint = "https://www.bing.com/translator"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",  # noqa: E501
         }
 
-    def fineSID(self):
-        response = self.session.get("https://www.bing.com/translator")
+    def findSID(self):
+        response = self.session.get(self.endpoint)
         response.raise_for_status()
+        url = response.url[:-10]
         ig = re.findall(r"\"ig\":\"(.*?)\"", response.text)[0]
         iid = re.findall(r"data-iid=\"(.*?)\"", response.text)[-1]
         key, token = re.findall(
             r"params_AbusePreventionHelper\s=\s\[(.*?),\"(.*?)\",", response.text
         )[0]
-        return ig, iid, key, token
+        return url, ig, iid, key, token
 
     def translate(self, text):
         text = text[:1000]  # bing translate max length
-        ig, iid, key, token = self.fineSID()
+        url, ig, iid, key, token = self.findSID()
         response = self.session.post(
-            f"{self.endpoint}?IG={ig}&IID={iid}",
+            f"{url}ttranslatev3?IG={ig}&IID={iid}",
             data={
                 "fromLang": self.lang_in,
                 "to": self.lang_out,
@@ -126,16 +129,14 @@ class DeepLTranslator(BaseTranslator):
     # https://github.com/DeepLcom/deepl-python
     name = "deepl"
     envs = {
-        "DEEPL_SERVER_URL": "https://api.deepl.com",
         "DEEPL_AUTH_KEY": None,
     }
     lang_map = {"zh": "zh-Hans"}
 
     def __init__(self, lang_in, lang_out, model):
         super().__init__(lang_in, lang_out, model)
-        server_url = os.getenv("DEEPL_SERVER_URL", self.envs["DEEPL_SERVER_URL"])
         auth_key = os.getenv("DEEPL_AUTH_KEY")
-        self.client = deepl.Translator(auth_key, server_url=server_url)
+        self.client = deepl.Translator(auth_key)
 
     def translate(self, text):
         response = self.client.translate_text(
@@ -231,7 +232,6 @@ class AzureOpenAITranslator(BaseTranslator):
         base_url = os.getenv(
             "AZURE_OPENAI_BASE_URL", self.envs["AZURE_OPENAI_BASE_URL"]
         )
-        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
         if not model:
             model = os.getenv("AZURE_OPENAI_MODEL", self.envs["AZURE_OPENAI_MODEL"])
         super().__init__(lang_in, lang_out, model)
@@ -239,7 +239,7 @@ class AzureOpenAITranslator(BaseTranslator):
         self.client = openai.AzureOpenAI(
             azure_endpoint=base_url,
             azure_deployment=model,
-            api_version=api_version,
+            api_version="2024-06-01",
             api_key=api_key,
         )
 
@@ -266,6 +266,22 @@ class ZhipuTranslator(OpenAITranslator):
         if not model:
             model = os.getenv("ZHIPU_MODEL", self.envs["ZHIPU_MODEL"])
         super().__init__(lang_in, lang_out, model, base_url=base_url, api_key=api_key)
+
+    def translate(self, text) -> str:
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **self.options,
+                messages=self.prompt(text),
+            )
+        except openai.BadRequestError as e:
+            if (
+                json.loads(response.choices[0].message.content.strip())["error"]["code"]
+                == "1301"
+            ):
+                return "IRREPARABLE TRANSLATION ERROR"
+            raise e
+        return response.choices[0].message.content.strip()
 
 
 class SiliconTranslator(OpenAITranslator):
@@ -352,3 +368,77 @@ class TencentTranslator(BaseTranslator):
         self.req.SourceText = text
         resp: TextTranslateResponse = self.client.TextTranslate(self.req)
         return resp.TargetText
+
+
+class AnythingLLMTranslator(BaseTranslator):
+    name = "anythingllm"
+    envs = {
+        "AnythingLLM_URL": None,
+        "AnythingLLM_APIKEY": "api_key",
+    }
+
+    def __init__(self, lang_out, lang_in, model):
+        super().__init__(lang_out, lang_in, model)
+        self.api_url = os.getenv("AnythingLLM_URL", self.envs["AnythingLLM_URL"])
+        self.api_key = os.getenv("AnythingLLM_APIKEY", self.envs["AnythingLLM_APIKEY"])
+        self.headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def translate(self, text):
+        messages = self.prompt(text)
+        payload = {
+            "message": messages,
+            "mode": "chat",
+            "sessionId": "translation_expert",
+        }
+
+        response = requests.post(
+            self.api_url, headers=self.headers, data=json.dumps(payload)
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if "textResponse" in data:
+            return data["textResponse"].strip()
+
+
+class DifyTranslator(BaseTranslator):
+    name = "dify"
+    envs = {
+        "DIFY_API_URL": None,  # 填写实际 Dify API 地址
+        "DIFY_API_KEY": "api_key",  # 替换为实际 API 密钥
+    }
+
+    def __init__(self, lang_out, lang_in, model):
+        super().__init__(lang_out, lang_in, model)
+        self.api_url = os.getenv("DIFY_API_URL", self.envs["DIFY_API_URL"])
+        self.api_key = os.getenv("DIFY_API_KEY", self.envs["DIFY_API_KEY"])
+
+    def translate(self, text):
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "inputs": {
+                "lang_out": self.lang_out,
+                "lang_in": self.lang_in,
+                "text": text,
+            },
+            "response_mode": "blocking",
+            "user": "translator-service",
+        }
+
+        # 向 Dify 服务器发送请求
+        response = requests.post(
+            self.api_url, headers=headers, data=json.dumps(payload)
+        )
+        response.raise_for_status()
+        response_data = response.json()
+
+        # 解析响应
+        return response_data.get("data", {}).get("outputs", {}).get("text", [])
